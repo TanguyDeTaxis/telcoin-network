@@ -1,0 +1,26 @@
+[build]
+rustc-wrapper = "sccache"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Faster dev builds
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 1
+
+# Faster test compilation
+[profile.test]
+opt-level = 0
+debug = "line-tables-only"
+incremental = true
+
+[profile.test.package."*"]
+opt-level = 1
