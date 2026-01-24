@@ -1,11 +1,11 @@
 //! Consensus tests
 
 use crate::{
-    consensus::{Bullshark, Consensus, ConsensusMetrics, LeaderSchedule, LeaderSwapTable},
+    consensus::{Bullshark, Consensus, LeaderSchedule, LeaderSwapTable},
     test_utils::make_optimal_certificates,
     ConsensusBus,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 use tn_storage::{mem_db::MemDatabase, CertificateStore, ConsensusStore};
 use tn_test_utils_committee::CommitteeFixture;
 use tn_types::{
@@ -44,7 +44,6 @@ async fn test_consensus_recovery_with_bullshark() {
     let (certificates, _next_parents) =
         make_optimal_certificates(&committee, 1..=7, &genesis, &ids);
 
-    let metrics = Arc::new(ConsensusMetrics::default());
     let leader_schedule = LeaderSchedule::from_store(
         committee.clone(),
         consensus_store.clone(),
@@ -52,7 +51,6 @@ async fn test_consensus_recovery_with_bullshark() {
     );
     let bullshark = Bullshark::new(
         committee.clone(),
-        metrics.clone(),
         num_sub_dags_per_schedule,
         leader_schedule.clone(),
         DEFAULT_BAD_NODES_STAKE_THRESHOLD,
@@ -137,7 +135,6 @@ async fn test_consensus_recovery_with_bullshark() {
     );
     let bullshark = Bullshark::new(
         committee.clone(),
-        metrics.clone(),
         num_sub_dags_per_schedule,
         leader_schedule,
         DEFAULT_BAD_NODES_STAKE_THRESHOLD,
@@ -195,7 +192,6 @@ async fn test_consensus_recovery_with_bullshark() {
     let bad_nodes_stake_threshold = 0;
     let bullshark = Bullshark::new(
         committee.clone(),
-        metrics.clone(),
         num_sub_dags_per_schedule,
         LeaderSchedule::new(committee.clone(), LeaderSwapTable::default()),
         bad_nodes_stake_threshold,

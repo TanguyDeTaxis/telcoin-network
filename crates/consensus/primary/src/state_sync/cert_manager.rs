@@ -9,10 +9,8 @@ use crate::{
     certificate_fetcher::CertificateFetcherCommand,
     consensus::gc_round,
     error::{CertManagerError, CertManagerResult, GarbageCollectorError},
-    state_sync::cert_validator::certificate_source,
     ConsensusBus,
 };
-use consensus_metrics::monitored_scope;
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
@@ -96,14 +94,6 @@ where
 
             // check pending status
             if self.pending.is_pending(&digest) {
-                // metrics
-                self.consensus_bus
-                    .primary_metrics()
-                    .node_metrics
-                    .certificates_suspended
-                    .with_label_values(&["dedup_locked"])
-                    .inc();
-
                 // track error for caller that at least one cert is pending
                 // and continue processing other certs
                 result = Err(CertManagerError::Pending(digest));
@@ -119,12 +109,6 @@ where
                 let missing_parents = self.get_missing_parents(&cert).await?;
                 if !missing_parents.is_empty() {
                     self.pending.insert_pending(cert, missing_parents)?;
-                    // metrics
-                    self.consensus_bus
-                        .primary_metrics()
-                        .node_metrics
-                        .certificates_currently_suspended
-                        .set(self.pending.num_pending() as i64);
 
                     // track error for caller that at least one cert is pending
                     // and continue processing other certs
@@ -149,8 +133,6 @@ where
         &self,
         certificate: &Certificate,
     ) -> CertManagerResult<HashSet<CertificateDigest>> {
-        let _scope = monitored_scope("primary::state-sync::get_missing_parents");
-
         // handle genesis cert
         if certificate.round() == 1 {
             debug!(target: "primary::cert_manager", ?certificate, "cert round 1");
@@ -179,13 +161,6 @@ where
         // send request to start fetching parents
         if !missing_parents.is_empty() {
             debug!(target: "primary::cert_manager", ?certificate, "missing {} parents", missing_parents.len());
-            // metrics
-            self.consensus_bus
-                .primary_metrics()
-                .node_metrics
-                .certificates_suspended
-                .with_label_values(&["missing_parents"])
-                .inc();
 
             // start fetching parents
             self.consensus_bus
@@ -209,30 +184,12 @@ where
         &mut self,
         certificates: VecDeque<Certificate>,
     ) -> CertManagerResult<()> {
-        let _scope = monitored_scope("primary::cert_manager::accept_certificate");
         debug!(target: "primary::cert_manager", ?certificates, "accepting {:?} certificates", certificates.len());
 
         // write certificates to storage
         self.config.node_storage().write_all(certificates.clone())?;
 
         for cert in certificates.into_iter() {
-            // Update metrics for accepted certificates.
-            let highest_processed_round =
-                self.consensus_bus.committed_round_updates().borrow().max(cert.round());
-            let certificate_source = certificate_source(&self.config, &cert);
-            self.consensus_bus
-                .primary_metrics()
-                .node_metrics
-                .highest_processed_round
-                .with_label_values(&[certificate_source])
-                .set(highest_processed_round as i64);
-            self.consensus_bus
-                .primary_metrics()
-                .node_metrics
-                .certificates_processed
-                .with_label_values(&[certificate_source])
-                .inc();
-
             // NOTE: these next two steps are considered critical
             //
             // any error must be treated as fatal to avoid inconsistent state between DAG and

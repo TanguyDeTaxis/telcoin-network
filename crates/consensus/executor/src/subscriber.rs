@@ -1,7 +1,6 @@
 //! Subscriber handles consensus output.
 
 use crate::{errors::SubscriberResult, SubscriberError};
-use consensus_metrics::monitored_future;
 use futures::{stream::FuturesOrdered, StreamExt};
 use state_sync::{last_executed_consensus_block, save_consensus, spawn_state_sync};
 use std::{
@@ -71,50 +70,35 @@ pub fn spawn_subscriber<DB: Database>(
     match mode {
         // If we are active then partcipate in consensus.
         NodeMode::CvvActive => {
-            task_manager.spawn_critical_task(
-                "subscriber consensus",
-                monitored_future!(
-                    async move {
-                        info!(target: "subscriber", "Starting subscriber: CVV");
-                        if let Err(e) = subscriber.run(rx_shutdown).await {
-                            error!(target: "subscriber", "Error subscriber consensus: {e}");
-                        }
-                    },
-                    "SubscriberTask"
-                ),
-            );
+            task_manager.spawn_critical_task("subscriber consensus", async move {
+                info!(target: "subscriber", "Starting subscriber: CVV");
+                if let Err(e) = subscriber.run(rx_shutdown).await {
+                    error!(target: "subscriber", "Error subscriber consensus: {e}");
+                }
+            });
         }
         NodeMode::CvvInactive => {
             let clone = task_manager.get_spawner();
             // If we are not active but are a CVV then catch up and rejoin.
             task_manager.spawn_critical_task(
                 "subscriber catch up and rejoin consensus",
-                monitored_future!(
-                    async move {
-                        info!(target: "subscriber", "Starting subscriber: Catch up and rejoin");
-                        if let Err(e) = subscriber.catch_up_rejoin_consensus(clone).await {
-                            error!(target: "subscriber", "Error catching up consensus: {e}");
-                        }
-                    },
-                    "SubscriberFollowTask"
-                ),
+                async move {
+                    info!(target: "subscriber", "Starting subscriber: Catch up and rejoin");
+                    if let Err(e) = subscriber.catch_up_rejoin_consensus(clone).await {
+                        error!(target: "subscriber", "Error catching up consensus: {e}");
+                    }
+                },
             );
         }
         NodeMode::Observer => {
             let clone = task_manager.get_spawner();
             // If we are not active then just follow consensus.
-            task_manager.spawn_critical_task(
-                "subscriber follow consensus",
-                monitored_future!(
-                    async move {
-                        info!(target: "subscriber", "Starting subscriber: Follower");
-                        if let Err(e) = subscriber.follow_consensus(clone).await {
-                            error!(target: "subscriber", "Error following consensus: {e}");
-                        }
-                    },
-                    "SubscriberFollowTask"
-                ),
-            );
+            task_manager.spawn_critical_task("subscriber follow consensus", async move {
+                info!(target: "subscriber", "Starting subscriber: Follower");
+                if let Err(e) = subscriber.follow_consensus(clone).await {
+                    error!(target: "subscriber", "Error following consensus: {e}");
+                }
+            });
         }
     }
 }
@@ -298,11 +282,6 @@ impl<DB: Database> Subscriber<DB> {
                 }
 
             }
-
-            self.consensus_bus
-                .executor_metrics()
-                .waiting_elements_subscriber
-                .set(waiting.len() as i64);
         }
     }
 
@@ -365,31 +344,15 @@ impl<DB: Database> Subscriber<DB> {
             }
         }
 
-        let fetched_batches_timer = self
-            .consensus_bus
-            .executor_metrics()
-            .block_fetch_for_committed_subdag_total_latency
-            .start_timer();
-        self.consensus_bus
-            .executor_metrics()
-            .committed_subdag_block_count
-            .observe(num_blocks as f64);
         let mut fetched_batches = self.fetch_batches_from_peers(batch_set).await?;
-        drop(fetched_batches_timer);
 
         // map all fetched batches to their respective certificates for applying block rewards
         for cert in &sub_dag.certificates {
             // create collection of batches to execute for this certificate
             let mut cert_batches = Vec::with_capacity(cert.header().payload().len());
-            self.consensus_bus.executor_metrics().subscriber_current_round.set(cert.round() as i64);
-            self.consensus_bus
-                .executor_metrics()
-                .subscriber_certificate_latency
-                .observe(cert.created_at().elapsed().as_secs_f64());
 
             // retrieve fetched batch by digest
             for digest in cert.header().payload().keys() {
-                self.consensus_bus.executor_metrics().subscriber_processed_blocks.inc();
                 let batch = fetched_batches.remove(digest).ok_or(SubscriberError::MissingFetchedBatch(*digest)).inspect_err(|_| {
                     error!(target: "subscriber", "[Protocol violation] Batch not found in fetched batches from workers of certificate signers");
                 })?;
@@ -427,34 +390,18 @@ impl<DB: Database> Subscriber<DB> {
             }
         };
         for (digest, block) in blocks.batches.into_iter() {
-            self.record_fetched_batch_metrics(&block, &digest);
+            if let Some(received_at) = block.received_at() {
+                let remote_duration = received_at.elapsed().as_secs_f64();
+                debug!(
+                    target: "subscriber",
+                    "Block {:?} took {} seconds since it was received to when it was fetched for execution",
+                    digest,
+                    remote_duration,
+                );
+            }
             fetched_blocks.insert(digest, block);
         }
 
         Ok(fetched_blocks)
-    }
-
-    fn record_fetched_batch_metrics(&self, batch: &Batch, digest: &BlockHash) {
-        if let Some(received_at) = batch.received_at() {
-            let remote_duration = received_at.elapsed().as_secs_f64();
-            debug!(
-                target: "subscriber",
-                "Batch was fetched for execution after being received from another worker {}s ago.",
-                remote_duration
-            );
-            self.consensus_bus
-                .executor_metrics()
-                .block_execution_local_latency
-                .with_label_values(&["other"])
-                .observe(remote_duration);
-
-            self.consensus_bus.executor_metrics().block_execution_latency.observe(remote_duration);
-            debug!(
-                target: "subscriber",
-                "Block {:?} took {} seconds since it has been created to when it has been fetched for execution",
-                digest,
-                remote_duration,
-            );
-        };
     }
 }

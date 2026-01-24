@@ -6,11 +6,9 @@ use crate::{
     state_sync::StateSynchronizer,
     ConsensusBus,
 };
-use consensus_metrics::monitored_future;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 use tn_config::{ConsensusConfig, KeyConfig};
 use tn_network_libp2p::error::NetworkError;
-use tn_primary_metrics::PrimaryMetrics;
 use tn_storage::CertificateStore;
 use tn_types::{
     ensure,
@@ -47,8 +45,6 @@ pub(crate) struct Certifier<DB> {
     consensus_bus: ConsensusBus,
     /// A network sender to send the batches to the other workers.
     network: PrimaryNetworkHandle,
-    /// Metrics handler
-    metrics: Arc<PrimaryMetrics>,
     /// Spawn epoch-related tasks.
     task_spawner: TaskSpawner,
     /// Notifier to cancel pending proposals and vote requests if new header is received.
@@ -71,12 +67,9 @@ impl<DB: Database> Certifier<DB> {
             return;
         };
 
-        let primary_metrics = consensus_bus.primary_metrics().node_metrics.clone();
-
         // spawn long-running task to gossip own certificates
         let task_spawner = task_manager.get_spawner();
-        task_manager.spawn_critical_task("certifier task", monitored_future!(
-            async move {
+        task_manager.spawn_critical_task("certifier task", async move {
                 let highest_created_certificate = config.node_storage().last_round(&authority_id).expect("certificate store available");
                 debug!(
                     target: "epoch-manager",
@@ -103,16 +96,13 @@ impl<DB: Database> Certifier<DB> {
                     config,
                     consensus_bus,
                     network: primary_network,
-                    metrics: primary_metrics,
                     task_spawner,
                     new_proposal: Notifier::new(),
                 }
                 .run()
                 .await;
                 info!(target: "primary::certifier", "Certifier on node {} has shutdown.", authority_id);
-            },
-            "CertifierTask"
-        ));
+            });
     }
 
     /// Requests a vote for a Header from the given peer. Retries indefinitely until either a
@@ -265,13 +255,11 @@ impl<DB: Database> Certifier<DB> {
             });
         }
 
-        self.metrics.proposed_header_round.set(header.round() as i64);
-
         // subscribe early for shutdown notifications
         let cancel_proposal = self.new_proposal.subscribe();
 
         // reset the votes aggregator and sign own header
-        let mut votes_aggregator = VotesAggregator::new(self.metrics.clone());
+        let mut votes_aggregator = VotesAggregator::new();
         let vote = Vote::new(&header, self.authority_id.clone(), &self.signature_service);
         let mut certificate = votes_aggregator.append(vote, &self.committee, &header)?;
 
