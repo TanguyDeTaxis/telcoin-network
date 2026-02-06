@@ -215,7 +215,26 @@ impl<T: Send + 'static> TnSender<T> for mpsc::Sender<T> {
 
 impl<T: Send + Clone> TnReceiver<T> for broadcast::Receiver<T> {
     async fn recv(&mut self) -> Option<T> {
-        broadcast::Receiver::recv(self).await.ok()
+        loop {
+            match broadcast::Receiver::recv(self).await {
+                Ok(value) => return Some(value),
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    // Log the lag event and continue receiving.
+                    // After Lagged, the internal cursor is updated and the next recv
+                    // will return the oldest message still in the buffer.
+                    // Previously this was silently converted to None via .ok(),
+                    // which caused observers to exit their recv loop and stop following
+                    // consensus entirely.
+                    tracing::warn!(
+                        target: "tn::observer",
+                        messages_lost = n,
+                        "broadcast channel lagged - receiver lost messages, resuming"
+                    );
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
     }
 
     fn try_recv(&mut self) -> Result<T, TryRecvError> {

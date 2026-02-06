@@ -259,7 +259,21 @@ impl PeerManager {
             self.apply_peer_action(peer_id, action);
         }
 
-        // TODO: Issue #254 update metrics
+        // Issue #254: peer metrics via tracing/OTel
+        let connected_count = self.peers.connected_peer_ids().count();
+        let dialing_count = self.peers.connected_or_dialing_peers().len().saturating_sub(connected_count);
+        let banned_count = self.temporarily_banned.len();
+        let known_count = self.known_peers.len();
+        let discovery_count = self.discovery_peers.len();
+        info!(
+            target: "tn::network",
+            connected_count,
+            dialing_count,
+            banned_count,
+            known_count,
+            discovery_count,
+            "peer manager heartbeat"
+        );
 
         // enforce connection limits
         self.prune_connected_peers();
