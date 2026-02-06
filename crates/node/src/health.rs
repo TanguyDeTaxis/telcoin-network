@@ -202,8 +202,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_sync_status_body() {
+    #[tokio::test]
+    async fn test_sync_status_body() {
         let bus = ConsensusBus::new();
 
         // Initial state: no data

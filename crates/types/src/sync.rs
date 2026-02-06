@@ -278,10 +278,10 @@ mod tests {
             let _ = tx.send(i);
         }
 
-        // The receiver has lagged. With the fix, recv() should NOT return None.
-        // Instead, it should skip the lagged messages and return the oldest
-        // available message (which is 16, since 0..15 were dropped).
-        let value = slow_rx.recv().await;
+        // The receiver has lagged. With the fix, TnReceiver::recv() should NOT
+        // return None. Instead, it should skip the lagged messages and return the
+        // oldest available message (which is 16, since 0..15 were dropped).
+        let value = TnReceiver::recv(&mut slow_rx).await;
         assert!(value.is_some(), "recv() must not return None on lag");
         // After lag, the next available message should be 16 (first non-dropped)
         assert_eq!(value.unwrap(), 16);
@@ -298,11 +298,11 @@ mod tests {
         drop(tx);
 
         // First recv gets the message
-        let value = rx.recv().await;
+        let value = TnReceiver::recv(&mut rx).await;
         assert_eq!(value, Some(42));
 
         // Second recv: channel closed, should return None
-        let value = rx.recv().await;
+        let value = TnReceiver::recv(&mut rx).await;
         assert!(value.is_none(), "closed channel must return None");
     }
 

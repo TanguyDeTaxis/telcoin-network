@@ -204,7 +204,7 @@ impl<DB: Database> Subscriber<DB> {
             processed_count += 1;
 
             // Periodically log observer progress (every 100 blocks)
-            if processed_count % 100 == 0 {
+            if processed_count.is_multiple_of(100) {
                 let latest_executed = self.consensus_bus.latest_block_num_hash().number;
                 let latest_known = self
                     .consensus_bus

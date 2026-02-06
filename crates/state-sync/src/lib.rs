@@ -14,7 +14,7 @@ use tn_storage::{
 use tn_types::{
     AuthorityIdentifier, ConsensusHeader, ConsensusOutput, Database, DbTxMut, TaskSpawner, TnSender,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 mod epoch;
 pub use epoch::spawn_epoch_record_collector;
